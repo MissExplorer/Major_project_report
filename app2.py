@@ -106,12 +106,12 @@ if uploaded_file:
     st.plotly_chart(fig, use_container_width=True)
 
     # Show metrics if available
-    if not np.isnan(mae):
-        st.subheader("📏 Model Evaluation")
-        st.write("Performance on historical data:")
-        st.metric("MAE", f"{mae:.2f}")
-        st.metric("RMSE", f"{rmse:.2f}")
-        st.metric("MSE", f"{mse:.2f}")
+    # if not np.isnan(mae):
+    #     st.subheader("📏 Model Evaluation")
+    #     st.write("Performance on historical data:")
+    #     st.metric("MAE", f"{mae:.2f}")
+    #     st.metric("RMSE", f"{rmse:.2f}")
+    #     st.metric("MSE", f"{mse:.2f}")
 
     # Show forecast and download option
     st.subheader("📁 Forecast Output")
