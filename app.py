@@ -23,25 +23,13 @@ st.sidebar.markdown("- **Linear Regression**: Simple linear trend")
 # File uploader
 data_file = st.file_uploader("📂 Upload cleaned tiger population CSV", type=["csv"])
 
-# Cache preprocessing
+# Preprocessing with caching
 @st.cache_data(show_spinner=False)
 def preprocess_data(df):
     yearly = df.groupby("Year", as_index=False)["Tiger Population"].sum()
     yearly["ds"] = pd.to_datetime(yearly["Year"], format="%Y")
     yearly["y"] = yearly["Tiger Population"]
     return yearly
-
-# Cache Prophet
-@st.cache_resource(show_spinner=False)
-def fit_prophet_model(data):
-    model = Prophet()
-    model.fit(data[["ds", "y"]])
-    return model
-
-# Cache ARIMA/SARIMA
-@st.cache_resource(show_spinner=False)
-def fit_auto_arima_model(data, seasonal=False):
-    return pm.auto_arima(data, seasonal=seasonal, stepwise=True, suppress_warnings=True)
 
 if data_file:
     df = pd.read_csv(data_file)
@@ -60,8 +48,10 @@ if data_file:
     forecast_df = None
 
     if model_choice == "Prophet":
-        model = fit_prophet_model(yearly)
-        forecast = model.predict(future_df[["ds"]])
+        with st.spinner("Training Prophet model..."):
+            model = Prophet()
+            model.fit(yearly[["ds", "y"]])
+            forecast = model.predict(future_df[["ds"]])
         forecast_df = forecast[["ds", "yhat", "yhat_lower", "yhat_upper"]].copy()
         forecast_df["Year"] = forecast_df["ds"].dt.year
         merged = pd.merge(yearly, forecast_df, on="Year", how="inner")
@@ -70,10 +60,11 @@ if data_file:
         mse = mean_squared_error(merged["y"], merged["yhat"])
 
     elif model_choice == "Linear Regression":
-        lr = LinearRegression()
-        lr.fit(yearly[["Year"]], yearly["y"])
-        pred_years = yearly["Year"].tolist() + future_years
-        pred_vals = lr.predict(np.array(pred_years).reshape(-1, 1))
+        with st.spinner("Training Linear Regression model..."):
+            lr = LinearRegression()
+            lr.fit(yearly[["Year"]], yearly["y"])
+            pred_years = yearly["Year"].tolist() + future_years
+            pred_vals = lr.predict(np.array(pred_years).reshape(-1, 1))
         forecast_df = pd.DataFrame({"Year": pred_years, "yhat": pred_vals})
         forecast_df["ds"] = pd.to_datetime(forecast_df["Year"], format="%Y")
         known_preds = forecast_df[forecast_df["Year"] <= yearly["Year"].max()]
@@ -83,20 +74,22 @@ if data_file:
         st.markdown(f"**Equation:** y = {lr.intercept_:.2f} + {lr.coef_[0]:.2f} * Year")
 
     elif model_choice == "ARIMA":
-        model = fit_auto_arima_model(yearly["y"], seasonal=False)
-        forecast_vals = model.predict(n_periods=len(future_years))
+        with st.spinner("Training ARIMA model..."):
+            model = pm.auto_arima(yearly["y"], seasonal=False, stepwise=True, suppress_warnings=True)
+            forecast_vals = model.predict(n_periods=len(future_years))
         forecast_df = pd.DataFrame({"Year": future_years, "yhat": forecast_vals})
         forecast_df["ds"] = pd.to_datetime(forecast_df["Year"], format="%Y")
         mae = rmse = mse = np.nan  # skip metric for unseen test
 
     elif model_choice == "SARIMA":
-        model = fit_auto_arima_model(yearly["y"], seasonal=True)
-        forecast_vals = model.predict(n_periods=len(future_years))
+        with st.spinner("Training SARIMA model..."):
+            model = pm.auto_arima(yearly["y"], seasonal=True, stepwise=True, suppress_warnings=True)
+            forecast_vals = model.predict(n_periods=len(future_years))
         forecast_df = pd.DataFrame({"Year": future_years, "yhat": forecast_vals})
         forecast_df["ds"] = pd.to_datetime(forecast_df["Year"], format="%Y")
         mae = rmse = mse = np.nan
 
-    # Plot
+    # Plot results
     st.subheader("📈 Forecast")
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=yearly["Year"], y=yearly["y"], name="Actual", mode="lines+markers"))
