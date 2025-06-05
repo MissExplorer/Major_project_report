@@ -7,46 +7,55 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from statsmodels.tsa.arima.model import ARIMA
 import pmdarima as pm
-from datetime import datetime
 
-# Streamlit app configuration
+# Set Streamlit app configuration
 st.set_page_config(page_title="🐅 Tiger Population Forecast", layout="centered")
 st.title("🐅 Tiger Population Forecast (Next 5 Years)")
 st.markdown("Forecast India's tiger population using **Prophet**, **Linear Regression**, **ARIMA**, and **SARIMA** models.")
 
-# Sidebar information
+# Sidebar description
 st.sidebar.markdown("### ℹ️ Model Info")
 st.sidebar.markdown("- **Prophet**: Captures trend/seasonality")
-st.sidebar.markdown("- **ARIMA/SARIMA**: Time-series patterns")
-st.sidebar.markdown("- **Linear Regression**: Simple linear trend")
+st.sidebar.markdown("- **ARIMA/SARIMA**: Time-series models")
+st.sidebar.markdown("- **Linear Regression**: Trend fitting")
 
-# File uploader
-data_file = st.file_uploader("📂 Upload cleaned tiger population CSV", type=["csv"])
+# File uploader for user input
+uploaded_file = st.file_uploader("📂 Upload cleaned tiger population CSV", type=["csv"])
 
-# Preprocessing with caching
+# Cache preprocessing for speed
 @st.cache_data(show_spinner=False)
 def preprocess_data(df):
+    # Aggregate total population by year
     yearly = df.groupby("Year", as_index=False)["Tiger Population"].sum()
-    yearly["ds"] = pd.to_datetime(yearly["Year"], format="%Y")
+    yearly["ds"] = pd.to_datetime(yearly["Year"], format="%Y")  # Prophet requires 'ds'
     yearly["y"] = yearly["Tiger Population"]
     return yearly
 
-if data_file:
-    df = pd.read_csv(data_file)
+if uploaded_file:
+    df = pd.read_csv(uploaded_file)
+
+    # Validate required columns
+    if df.empty or "Year" not in df.columns or "Tiger Population" not in df.columns:
+        st.error("Uploaded file must contain 'Year' and 'Tiger Population' columns.")
+        st.stop()
+
     yearly = preprocess_data(df)
 
+    # Show historical data chart
     st.subheader("📊 EDA")
     st.line_chart(yearly.set_index("Year")["Tiger Population"])
 
-    model_choice = st.radio("Choose Forecast Model:", ["Prophet", "Linear Regression", "ARIMA", "SARIMA"])
+    # Model selection UI
+    model_choice = st.radio("Choose Forecast Model:", ["Prophet", "Linear Regression", "ARIMA", "SARIMA"], index=0)
 
-    # Limit forecast to 5 years
+    # Forecasting range (next 5 years)
     future_years = list(range(yearly["Year"].max() + 1, yearly["Year"].max() + 6))
     future_df = pd.DataFrame({"Year": future_years})
     future_df["ds"] = pd.to_datetime(future_df["Year"], format="%Y")
 
-    forecast_df = None
+    forecast_df = None  # to hold forecast result
 
+    # Prophet Forecasting
     if model_choice == "Prophet":
         with st.spinner("Training Prophet model..."):
             model = Prophet()
@@ -59,6 +68,7 @@ if data_file:
         rmse = np.sqrt(mean_squared_error(merged["y"], merged["yhat"]))
         mse = mean_squared_error(merged["y"], merged["yhat"])
 
+    # Linear Regression Forecasting
     elif model_choice == "Linear Regression":
         with st.spinner("Training Linear Regression model..."):
             lr = LinearRegression()
@@ -73,40 +83,45 @@ if data_file:
         mse = mean_squared_error(yearly["y"], known_preds["yhat"])
         st.markdown(f"**Equation:** y = {lr.intercept_:.2f} + {lr.coef_[0]:.2f} * Year")
 
+    # ARIMA Forecasting
     elif model_choice == "ARIMA":
         with st.spinner("Training ARIMA model..."):
             model = pm.auto_arima(yearly["y"], seasonal=False, stepwise=True, suppress_warnings=True)
             forecast_vals = model.predict(n_periods=len(future_years))
         forecast_df = pd.DataFrame({"Year": future_years, "yhat": forecast_vals})
         forecast_df["ds"] = pd.to_datetime(forecast_df["Year"], format="%Y")
-        mae = rmse = mse = np.nan  # skip metric for unseen test
+        mae = rmse = mse = np.nan  # not calculated for now
 
+    # SARIMA Forecasting
     elif model_choice == "SARIMA":
         with st.spinner("Training SARIMA model..."):
             model = pm.auto_arima(yearly["y"], seasonal=True, stepwise=True, suppress_warnings=True)
             forecast_vals = model.predict(n_periods=len(future_years))
         forecast_df = pd.DataFrame({"Year": future_years, "yhat": forecast_vals})
         forecast_df["ds"] = pd.to_datetime(forecast_df["Year"], format="%Y")
-        mae = rmse = mse = np.nan
+        mae = rmse = mse = np.nan  # not calculated for now
 
-    # Plot results
+    # Plotting the forecast
     st.subheader("📈 Forecast")
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=yearly["Year"], y=yearly["y"], name="Actual", mode="lines+markers"))
     fig.add_trace(go.Scatter(x=forecast_df["Year"], y=forecast_df["yhat"], name="Forecast", mode="lines+markers"))
+
+    # Prophet confidence interval
     if model_choice == "Prophet":
         fig.add_trace(go.Scatter(x=forecast_df["Year"], y=forecast_df["yhat_upper"], name="Upper", line=dict(width=0), showlegend=False))
         fig.add_trace(go.Scatter(x=forecast_df["Year"], y=forecast_df["yhat_lower"], name="Lower", fill='tonexty', line=dict(width=0), fillcolor='rgba(0,100,80,0.2)', showlegend=False))
+
     fig.update_layout(xaxis_title="Year", yaxis_title="Tiger Population", hovermode="x unified")
     st.plotly_chart(fig, use_container_width=True)
 
-    # Show metrics
+    # Display model metrics if available
     if not np.isnan(mae):
-        st.subheader("📊 Model Fit (Historical)")
+        st.subheader("📊 Model Evaluation")
         metrics_df = pd.DataFrame({"Metric": ["MAE", "RMSE", "MSE"], "Value": [mae, rmse, mse]})
         st.table(metrics_df)
 
-    # Downloadable forecast
+    # Display and download forecast
     st.subheader("📥 Download Forecast")
     future_forecast = forecast_df[["Year", "yhat"]].rename(columns={"yhat": "Predicted Population"})
     st.dataframe(future_forecast)
